@@ -1,0 +1,5 @@
+1 Dependency: jQuery 1.2.6 for visualization
+
+The language is non-strict and simulates parallel computation by aggressively
+spawning worker threads whenever possible. It was designed to be visualized,
+so evaluation can optionally be yielded to the caller after every step.
