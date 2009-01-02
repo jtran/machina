@@ -80,41 +80,39 @@ function Exp() {
     return !this.eq.apply(this, arguments);
   }
   
-  this.toHtmlString = function() { return this.toString(); }
+  this.getChildren = function() { return [] }
+  
+  this.toHtmlString = function() { return this.toString() }
   
   this.toElmt = function() {
     var elmt = document.createElement('div');
     $(elmt).html(this.toHtmlString());
-    if (this.children) {
-      $.each(this.children, function(i, child) {
-        if (child.length) {
-          $.each(child, function(j, subchild) {
-            $(elmt).append(subchild.toElmt());
-          });
-        }
-        else {
-          $(elmt).append(child.toElmt());
-        }
-      });
-    }
+    $.each(this.getChildren(), function(i, child) {
+      if (child.length) {
+        $.each(child, function(j, subchild) {
+          $(elmt).append(subchild.toElmt());
+        });
+      }
+      else {
+        $(elmt).append(child.toElmt());
+      }
+    });
     elmt.className = this.className;
     return elmt;
   }
   
   this.toLayout = function() {
     var elmt = document.createElement('div');
-    if (this.children) {
-      $.each(this.children, function(i, child) {
-        if (child.length) {
-          $.each(child, function(j, subchild) {
-            $(elmt).append(subchild.toLayout());
-          });
-        }
-        else {
-          $(elmt).append(child.toLayout());
-        }
-      });
-    }
+    $.each(this.getChildren(), function(i, child) {
+      if (child.length) {
+        $.each(child, function(j, subchild) {
+          $(elmt).append(subchild.toLayout());
+        });
+      }
+      else {
+        $(elmt).append(child.toLayout());
+      }
+    });
     var div = document.createElement('div');
     $(div).append(this.toHtmlString());
     if (this.evaled) {
@@ -137,7 +135,7 @@ function Exp() {
     this.first = arguments[1];
     this.second = arguments[2];
     this.className = "exp list pair";
-    this.children = [this.first, this.second];
+    this.getChildren = function() { return [this.first, this.second] }
     this.toString = function() {
       return '(' + this.first + ', ' + this.second + ')';
     }
@@ -149,7 +147,7 @@ function Exp() {
   case 'FST':
     this.pair = arguments[1];
     this.className = 'exp fst';
-    this.children = [this.pair];
+    this.getChildren = function() { return [this.pair] }
     this.toString = function() {
       return this.pair + '.1';
     }
@@ -161,7 +159,7 @@ function Exp() {
   case 'SND':
     this.pair = arguments[1];
     this.className = 'exp snd';
-    this.children = [this.pair];
+    this.getChildren = function() { return [this.pair] }
     this.toString = function() {
       return this.pair + '.2';
     }
@@ -210,7 +208,7 @@ function Exp() {
       return isValue(v);
     }
     this.className = 'exp chan';
-    this.children = [this.sender];
+    this.getChildren = function() { return [this.sender] }
     this.toString = function() {
       return "(ch " + this.sender + ")";
     }
@@ -237,7 +235,7 @@ function Exp() {
       this.fixPoint = arguments[3];
     }
     this.className = 'exp fun';
-    this.children = [this.body]
+    this.getChildren = function() { return [this.body] }
     this.toString = function() {
       return 'fn(' + this.params.join(',') + ')';
     }
@@ -257,7 +255,7 @@ function Exp() {
     this.body = arguments[3];
     this.fixPoint = arguments[4];
     this.className = 'exp closure';
-    this.children = [this.body]
+    this.getChildren = function() { return [this.body] }
     this.toString = function() {
       return '<G, fn(' + this.params.join(',') + ')>';
     }
@@ -271,7 +269,7 @@ function Exp() {
   case 'APP':
     this.fun = arguments[1];
     this.args = arguments[2];
-    this.children = [this.fun, this.args];
+    this.getChildren = function() { return [this.fun, this.args] }
     this.className = 'exp app';
     this.toString = function() {
       return 'apply';
@@ -282,7 +280,7 @@ function Exp() {
     this.cond = arguments[1];
     this.branches = arguments[2];
     this.className = 'exp case';
-    this.children = [this.cond, this.branches]
+    this.getChildren = function() { return [this.cond, this.branches] }
     this.toString = function() {
       return 'case';
     }
@@ -315,7 +313,8 @@ function Exp() {
     break;
   
   default:
-    console.warn('Unknown expression type', this.type);
+    // clone calls this with 0 args all the time.
+    //console.warn('Unknown expression type', this.type);
   };
   
 }
@@ -332,6 +331,11 @@ function isValue(e) {
   default:
     return false;
   }
+}
+
+// TODO: implement
+function isNormalForm(e) {
+  return isValue(e);
 }
 
 // Returns true iff e is in weak head normal form (WHNF).
@@ -433,7 +437,7 @@ function evalStep(ctx, e) {
   case 'INT':
     return e;
   case 'SYM':
-    return ctx[e.symVal];
+    return clone(ctx[e.symVal]);
   case 'PRIM':
     return e;
   case 'FUN':
@@ -546,16 +550,18 @@ function evalStep(ctx, e) {
 }
 
 // Force evaluation of e in the given context.
-// This calls evalStep repeatedly until e is a value.
+// This calls evalStep repeatedly until e is in normal form.
 // A callback can optionally be given to watch evaluation step by step.
 function force(ctx, e) {
   var t = 0;
   var callback = (arguments.length > 2) ? arguments[2] : null;
   
-  while (!isValue(e)) {
+  while (!isNormalForm(e)) {
     // step each thing in the queue
     newQ = $.grep(q, function(work) {
-      return ! work.thunk();  // do work
+      var keep = ! work.thunk();  // do work
+      if (callback) callback(e, t);
+      return keep;
     });
     q = newQ.concat(pushedToQ);
     pushedToQ = [];
@@ -563,7 +569,7 @@ function force(ctx, e) {
     e = evalStep(ctx, e);
     
     // Show the caller where we are so far.
-    if (callback) callback(e);
+    if (callback) callback(e, t);
     
     // Track how many steps we've taken.
     t++;
