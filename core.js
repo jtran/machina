@@ -13,6 +13,24 @@ if (!console) {
   }
 }
 
+// Fix for Chrome (v1.0.154.36)
+// Apparently you can not set properties to the console object in Chrome because
+// it occasionally gets reset to the default.  :-(  Also, can't use the name "debug"
+// for a function; apparently that is special also.
+function dbg() {
+  if (typeof(console.debug) == "undefined") {
+    // Note: can't do arguments.join
+    var a = [];
+    for (var i = 0; i < arguments.length; i++) {
+      a.push(arguments[i].toString());
+    }
+    return console.log(a.join(' '));
+  }
+  else {
+    return console.debug.apply(console, arguments);
+  }
+}
+
 // Generic equality
 function equals(a, b) {
   for (var j, o = arguments, i = o.length, c = a instanceof Object; --i;)
@@ -50,6 +68,14 @@ function eg(expected, v) {
   return v;
 }
 
+// Asserts that an expression has a specified type
+function ofType(t, v) {
+  if (t !== v.type) {
+    console.error("Type assertion failed: expected: ", t, '  found: ', v.type);
+  }
+  return v;
+}
+
 
 // Global work queue
 var q = [];
@@ -60,14 +86,6 @@ function addToWorkQueue(f) {
   pushedToQ.push(f);
 }
 
-
-// Asserts that an expression has a specified type
-function ofType(t, v) {
-  if (t !== v.type) {
-    console.error("Type assertion failed: expected: ", t, '  found: ', v.type);
-  }
-  return v;
-}
 
 // The constructor for all expressions in the language.
 function Exp() {
@@ -199,7 +217,7 @@ function Exp() {
     this.value = null;
     this.send = function(v) {
       if (isValue(v)) {
-        console.debug('chan was sent value', this, v);
+        dbg('chan was sent value', this, v);
         this.value = v;
       }
       else {
@@ -216,7 +234,7 @@ function Exp() {
       return "(ch " + this.sender + ")";
     }
     this.toHtmlString = function() {
-      return "chan";
+      return "";
     }
     break;
   
@@ -391,8 +409,8 @@ function eval(ctx, e) {
   // If e is already a channel, don't spawn.
   if (e.type == 'CHAN') {
     // If the channel has already been sent a value, remove the channel.
-    if (e.value)  console.debug('popping chan %o with value %s', e, e.value);
-    if (!e.value) console.debug('evaling chan %s', e);
+    if (e.value)  dbg('popping chan %o with value %s', e, e.value);
+    if (!e.value) dbg('evaling chan %s', e);
     return (e.value) ? e.value
                      : e
   }
@@ -414,7 +432,7 @@ function eval(ctx, e) {
   }
   
   // Add g to the global thread queue.
-  console.debug('pushing ', e, ch);
+  dbg('pushing ', e, ch);
   addToWorkQueue({thunk: g, chan: ch});
   
   return ch;
@@ -440,6 +458,7 @@ function evalStep(ctx, e) {
   case 'INT':
     return e;
   case 'SYM':
+    dbg('cloning', e.symVal);
     return clone(ctx[e.symVal]);
   case 'PRIM':
     return e;
@@ -579,7 +598,7 @@ function force(ctx, e) {
     
     // Exit early if we've been running a long time.
     if (window.debug && t >= 100) {
-      console.debug('q', q);
+      dbg('q', q);
       console.error('force took too many iterations (%d). Turn off window.debug to continue unbounded.', t);
       return e;
     }
