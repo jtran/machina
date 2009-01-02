@@ -101,6 +101,7 @@ function Exp() {
     return !this.eq.apply(this, arguments);
   }
   
+  // This is a function so that cloning is easier.
   this.getChildren = function() { return [] }
   
   this.toHtmlString = function() { return this.toString() }
@@ -335,7 +336,7 @@ function Exp() {
   
   default:
     // clone calls this with 0 args all the time.
-    //console.warn('Unknown expression type', this.type);
+    if (this.type) console.warn('Unknown expression type', this.type);
   };
   
 }
@@ -354,7 +355,8 @@ function isValue(e) {
   }
 }
 
-// TODO: implement
+// TODO: implement.  Right now force still (incorrectly) returns things like
+// pairs of channels.
 function isNormalForm(e) {
   return isValue(e);
 }
@@ -439,8 +441,8 @@ function eval(ctx, e) {
 }
 
 // Evaluate e in the given context.
-// This only takes one step of evaluation, so the returned exp may not be a
-// value.
+// This only takes one step of evaluation, so the returned exp may not be
+// in normal form.
 function evalStep(ctx, e) {
   switch (e.type) {
   case 'NIL':
@@ -450,11 +452,11 @@ function evalStep(ctx, e) {
   case 'FST':
     var p = eval(ctx, e.pair);
     return (p.type == 'PAIR') ? p.first
-                              : eval(ctx, new Exp('FST', p));
+                              : new Exp('FST', p);
   case 'SND':
     var p = eval(ctx, e.pair);
     return (p.type == 'PAIR') ? p.second
-                              : eval(ctx, new Exp('SND', p));
+                              : new Exp('SND', p);
   case 'INT':
     return e;
   case 'SYM':
@@ -542,12 +544,6 @@ function evalStep(ctx, e) {
     
   case 'CASE':
     var vCond = eval(ctx, e.cond);
-    // eval patterns?
-    // eval patterns, but not branch bodies.
-    // var vBranches = $.map(e.branches, function(i, e) {
-    //       return (i % 2 == 0) ? eval(ctx, e)
-    //                           : e
-    //     });
     
     if (!isWhnf(vCond)) return new Exp('CASE', vCond, e.branches);
     
@@ -567,7 +563,7 @@ function evalStep(ctx, e) {
     throw e;
     
   default:
-    console.error('Can not evalate expression of unknown type: ', e);
+    console.error('Can not evalate expression of unknown type: %s', e.type, e);
   }
 }
 
