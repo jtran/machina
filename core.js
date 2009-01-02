@@ -32,8 +32,11 @@ function clone(obj) {
 
   var temp = new obj.constructor();
 
-  for (var k in obj)
-  temp[k] = clone(obj[k]);
+  for (var k in obj) {
+    // TODO: make transients generic, not just this one field.
+    if (k == 'evaled') continue;  // Don't copy transients
+    temp[k] = clone(obj[k]);
+  }
 
   return temp;
 }
