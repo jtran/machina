@@ -39,7 +39,7 @@ function equals(a, b) {
     else if (!c || !(b instanceof Object))
       return false;
     else for (j in b)
-      if (!equals(a[j], b[j]))
+      if (j != 'meta' && !equals(a[j], b[j]))  // Don't compare metadata
         return false;
   return true;
 }
@@ -48,11 +48,18 @@ function equals(a, b) {
 function clone(obj) {
   if (obj == null || typeof(obj) != 'object') return obj;
 
-  var temp = new obj.constructor();
+  var temp;
+  try {
+    temp = new obj.constructor();
+  }
+  catch (e) {
+    // Can't call constructor
+    return obj;
+  }
 
   for (var k in obj) {
     // TODO: make transients generic, not just this one field.
-    if (k == 'evaled') continue;  // Don't copy transients
+    if (k == 'evaled' || k == 'meta') continue;  // Don't copy transients
     temp[k] = clone(obj[k]);
   }
 
@@ -90,6 +97,8 @@ function addToWorkQueue(f) {
 // The constructor for all expressions in the language.
 function Exp() {
   this.type = arguments[0];
+  this.meta = clone(arguments[1]);  // clone since this is an object that mutates
+  arguments.shift();
 
   this.eq = function() {
     var a = [this];
@@ -98,54 +107,21 @@ function Exp() {
   }
 
   this.neq = function() {
-    return !this.eq.apply(this, arguments);
+    return ! this.eq.apply(this, arguments);
   }
+  
+  this.updateEvaled = function(v) {
+    $.each(this.meta.views, function(i, view) {
+      view.updateEvaled(v);
+    });
+  }
+  
+  this.toHtmlString = function() { return this.toString() }
   
   // This is a function so that cloning is easier.
   this.getChildren = function() { return [] }
   
-  this.toHtmlString = function() { return this.toString() }
-  
-  this.toElmt = function() {
-    var elmt = document.createElement('div');
-    $(elmt).html(this.toHtmlString());
-    $.each(this.getChildren(), function(i, child) {
-      if (child.length) {
-        $.each(child, function(j, subchild) {
-          $(elmt).append(subchild.toElmt());
-        });
-      }
-      else {
-        $(elmt).append(child.toElmt());
-      }
-    });
-    elmt.className = this.className;
-    return elmt;
-  }
-  
-  this.toLayout = function() {
-    var elmt = document.createElement('div');
-    $.each(this.getChildren(), function(i, child) {
-      if (child.length) {
-        $.each(child, function(j, subchild) {
-          $(elmt).append(subchild.toLayout());
-        });
-      }
-      else {
-        $(elmt).append(child.toLayout());
-      }
-    });
-    var div = document.createElement('div');
-    $(div).append(this.toHtmlString());
-    if (this.evaled) {
-      $(div).append('<span class="evaled">' + this.evaled + '</span>');
-    }
-    $(elmt).append(div);
-    elmt.className = this.className;
-    return elmt;
-  };
-  
-  switch (arguments[0]) {
+  switch (this.type) {
   case 'NIL':
     this.className = "exp list nil";
     this.toString = function() {
@@ -306,22 +282,80 @@ function Exp() {
     this.toString = function() {
       return 'case';
     }
-    this.toLayout = function() {
-      var elmt = document.createElement('div');
+    break;
+  
+  default:
+    // clone calls this with 0 args all the time.
+    if (this.type) console.warn('Unknown expression type', this.type);
+  };
+  
+}
+
+function ExpController() {
+}
+
+function ExpElmtView() {
+  this.controller = arguments[0];
+  this.model = arguments[1];
+  this.children = [];
+  
+  this.toHtmlString = function() { return this.model.toHtmlString() }
+  
+  this.toElmt = function() {
+    var elmt = document.createElement('div');
+    $(elmt).html(this.toHtmlString());
+    $.each(this.children, function(i, childView) {
+      if (childView.length) {
+        $.each(childView, function(j, subchildView) {
+          $(elmt).append(subchildView.toElmt());
+        });
+      }
+      else {
+        $(elmt).append(childView.toElmt());
+      }
+    });
+    elmt.className = this.model.className;
+    
+    this.elmt = elmt;
+    return elmt;
+  }
+  
+  this.updateEvaled = function(v) {
+    this.evaled = v;
+    //$(elmt).find('.evaled').html(v);
+  }
+}
+
+function ExpLayoutView() {
+  this.controller = arguments[0];
+  this.model = arguments[1];
+  this.children = [];
+  this.elmt = null;
+  
+  this.toHtmlString = function() { return this.model.toHtmlString() }
+  
+  this.toElmt = function() {
+    var elmt;
+    
+    switch (this.model.type) {
+    case 'CASE':
+      var branches = this.model.branches;
+      
+      elmt = document.createElement('div');
       $(elmt).append(this.cond.toLayout());
-      for (var i = 0; i < this.branches.length; i += 2) {
+      for (var i = 0; i < branches.length; i += 2) {
         // Make a div of each branch
         var div = document.createElement('div');
-        $(div).append(this.branches[i].toLayout());
-        if (i != this.branches.length - 1) {
-          $(div).append(this.branches[i+1].toLayout());
+        $(div).append(branches[i].toLayout());
+        if (i != branches.length - 1) {
+          $(div).append(branches[i+1].toLayout());
         }
         // Set the class
         div.className = 'case_branch';
-        
+
         $(elmt).append(div);
       }
-      
+
       var div = document.createElement('div');
       $(div).append(this.toHtmlString());
       if (this.evaled) {
@@ -330,15 +364,49 @@ function Exp() {
       div.className = 'label';
       $(elmt).append(div);
       elmt.className = this.className;
-      return elmt;
-    };
-    break;
+      break;
+    
+    default:
+      elmt = document.createElement('div');
+      $.each(this.children, function(i, childView) {
+        if (childView.length) {
+          $.each(childView, function(j, subchildView) {
+            $(elmt).append(subchildView.toLayout());
+          });
+        }
+        else {
+          $(elmt).append(childView.toLayout());
+        }
+      });
+      var div = document.createElement('div');
+      $(div).append(this.toHtmlString());
+      if (this.evaled) {
+        $(div).append('<span class="evaled">' + this.evaled + '</span>');
+      }
+      $(elmt).append(div);
+      elmt.className = this.model.className;
+      break;
+    }
+    
+    this.elmt = elmt;
+    return elmt;
+  }
   
-  default:
-    // clone calls this with 0 args all the time.
-    if (this.type) console.warn('Unknown expression type', this.type);
-  };
+  this.updateEvaled = function(v) {
+    this.evaled = v;
+    $(elmt).find('.evaled').html(v);
+  }
+}
+
+function createView(controller, e, viewConstructor) {
+  var view = new viewConstructor(controller, e);
+  e.meta.views.push(view);
   
+  $.each(e.getChildren(), function(i, eChild) {
+    view.children.push(createView(controller, eChild, viewConstructor));
+  });
+  
+  return view;
 }
 
 // Returns true iff e is a value.
@@ -417,7 +485,7 @@ function eval(ctx, e) {
                      : e
   }
   
-  var ch = new Exp('CHAN', ctx, e);
+  var ch = new Exp('CHAN', e.meta, ctx, e);
   
   // Wrap call to evalStep so that we can return immediately and
   // send the eventual return value to the channel.
@@ -427,6 +495,7 @@ function eval(ctx, e) {
     // Cache results
     if (v !== ch.sender) {
       ch.sender.evaled = v;
+      ch.sender.updateEvaled(v);
     }
     
     // Channel determines whether we should be removed from the queue.
@@ -452,11 +521,11 @@ function evalStep(ctx, e) {
   case 'FST':
     var p = eval(ctx, e.pair);
     return (p.type == 'PAIR') ? p.first
-                              : new Exp('FST', p);
+                              : new Exp('FST', e.meta, p);
   case 'SND':
     var p = eval(ctx, e.pair);
     return (p.type == 'PAIR') ? p.second
-                              : new Exp('SND', p);
+                              : new Exp('SND', e.meta, p);
   case 'INT':
     return e;
   case 'SYM':
@@ -465,7 +534,7 @@ function evalStep(ctx, e) {
   case 'PRIM':
     return e;
   case 'FUN':
-    return new Exp('CLOSURE', ctx, e.params, e.body, e.fixPoint);
+    return new Exp('CLOSURE', e.meta, ctx, e.params, e.body, e.fixPoint);
   case 'CLOSURE':
     return e;
   case 'CHAN':
@@ -487,32 +556,32 @@ function evalStep(ctx, e) {
       
       switch (f.primOp) {
       case 'ADD':
-        if (notAllInt()) return new Exp('APP', f, args);
+        if (notAllInt()) return new Exp('APP', e.meta, f, args);
         s = 0;
         $.each(args, function() {
           s += this.intVal;
         });
-        return new Exp('INT', s);
+        return new Exp('INT', e.meta, s);
       case 'MUL':
-        if (notAllInt()) return new Exp('APP', f, args);
+        if (notAllInt()) return new Exp('APP', e.meta, f, args);
         s = 1;
         $.each(args, function() {
           s *= this.intVal;
         });
-        return new Exp('INT', s);
+        return new Exp('INT', e.meta, s);
       case 'SUB':
-        if (notAllInt()) return new Exp('APP', f, args);
-        return new Exp('INT', args[0].intVal - args[1].intVal);
+        if (notAllInt()) return new Exp('APP', e.meta, f, args);
+        return new Exp('INT', e.meta, args[0].intVal - args[1].intVal);
       case 'NEG':
-        if (notAllInt()) return new Exp('APP', f, args);
-        return new Exp('INT', -args[0].intVal);
+        if (notAllInt()) return new Exp('APP', e.meta, f, args);
+        return new Exp('INT', e.meta, -args[0].intVal);
       case '=':
         // TODO: Fix this
         if (args[0].eq(args[1])) {
-          return new Exp('INT', 1);
+          return new Exp('INT', e.meta, 1);
         }
         else {
-          return new Exp('NIL');
+          return new Exp('NIL', e.meta);
         }
       default:
         console.error('Unknown primitive op: ', f);
@@ -540,12 +609,12 @@ function evalStep(ctx, e) {
 
       return v;
     }
-    return new Exp('APP', f, args);
+    return new Exp('APP', e.meta, f, args);
     
   case 'CASE':
     var vCond = eval(ctx, e.cond);
     
-    if (!isWhnf(vCond)) return new Exp('CASE', vCond, e.branches);
+    if (!isWhnf(vCond)) return new Exp('CASE', e.meta, vCond, e.branches);
     
     for (var i = 0; i < e.branches.length; i += 2) {
       // If we've reached the end, the last pattern is actually the else
@@ -584,7 +653,8 @@ function force(ctx, e) {
     q = newQ.concat(pushedToQ);
     pushedToQ = [];
     
-    e = evalStep(ctx, e);
+    var e2 = evalStep(ctx, e);
+    e = e2;
     
     // Show the caller where we are so far.
     if (callback) callback(e, t);
