@@ -50,6 +50,7 @@ function clone(obj) {
 
   var temp;
   try {
+    if (obj.constructor == Exp) return cloneExp(obj);
     temp = new obj.constructor();
   }
   catch (e) {
@@ -58,11 +59,24 @@ function clone(obj) {
   }
 
   for (var k in obj) {
-    // TODO: make transients generic, not just this one field.
-    if (k == 'evaled' || k == 'meta') continue;  // Don't copy transients
     temp[k] = clone(obj[k]);
   }
 
+  return temp;
+}
+
+function cloneExp(obj) {
+  dbg("cloneExp")
+
+  var temp = new Exp();
+  
+  // TODO: make transients generic, not just these fields.
+  for (var k in obj) {
+    if (k == 'evaled' || k == 'meta') continue;  // Don't copy transients
+    temp[k] = clone(obj[k]);
+  }
+  temp.meta = {views: []};
+  
   return temp;
 }
 
@@ -98,7 +112,10 @@ function addToWorkQueue(f) {
 function Exp() {
   this.type = arguments[0];
   this.meta = clone(arguments[1]);  // clone since this is an object that mutates
-  arguments.shift();
+  var args = [];
+  for (var i = 0; i + 2 < arguments.length; i++) {
+    args[i] = arguments[i + 2];
+  }
 
   this.eq = function() {
     var a = [this];
@@ -130,8 +147,8 @@ function Exp() {
     break;
   
   case 'PAIR':
-    this.first = arguments[1];
-    this.second = arguments[2];
+    this.first = args[0];
+    this.second = args[1];
     this.className = "exp list pair";
     this.getChildren = function() { return [this.first, this.second] }
     this.toString = function() {
@@ -143,7 +160,7 @@ function Exp() {
     break;
   
   case 'FST':
-    this.pair = arguments[1];
+    this.pair = args[0];
     this.className = 'exp fst';
     this.getChildren = function() { return [this.pair] }
     this.toString = function() {
@@ -155,7 +172,7 @@ function Exp() {
     break;
   
   case 'SND':
-    this.pair = arguments[1];
+    this.pair = args[0];
     this.className = 'exp snd';
     this.getChildren = function() { return [this.pair] }
     this.toString = function() {
@@ -167,7 +184,7 @@ function Exp() {
     break;
   
   case 'INT':
-    this.intVal = arguments[1];
+    this.intVal = args[0];
     this.className = 'exp int';
     this.toString = function() {
       return this.intVal.toString(); // + ' : ' + this.type.toLowerCase();
@@ -178,7 +195,7 @@ function Exp() {
     break;
   
   case 'SYM':
-    this.symVal = arguments[1];
+    this.symVal = args[0];
     this.className = 'exp sym';
     this.toString = function() {
       return this.symVal;
@@ -189,8 +206,8 @@ function Exp() {
     break;
   
   case 'CHAN':
-    this.ctx = arguments[1];
-    this.sender = arguments[2];
+    this.ctx = args[0];
+    this.sender = args[1];
     this.value = null;
     this.send = function(v) {
       if (isValue(v)) {
@@ -216,7 +233,7 @@ function Exp() {
     break;
   
   case 'PRIM':
-    this.primOp = arguments[1];
+    this.primOp = args[0];
     this.className = 'exp prim';
     this.toString = function() {
       return this.primOp;
@@ -224,13 +241,13 @@ function Exp() {
     break;
   
   case 'FUN':
-    $.each(arguments[1], function(i, s) {
+    $.each(args[0], function(i, s) {
       ofType('SYM', s);
     });
-    this.params = arguments[1];
-    this.body = arguments[2];
-    if (arguments.length > 3) {
-      this.fixPoint = arguments[3];
+    this.params = args[0];
+    this.body = args[1];
+    if (args.length > 2) {
+      this.fixPoint = args[2];
     }
     this.className = 'exp fun';
     this.getChildren = function() { return [this.body] }
@@ -248,10 +265,10 @@ function Exp() {
     break;
   
   case 'CLOSURE':
-    this.ctx = arguments[1];
-    this.params = arguments[2];
-    this.body = arguments[3];
-    this.fixPoint = arguments[4];
+    this.ctx = args[0];
+    this.params = args[1];
+    this.body = args[2];
+    this.fixPoint = args[3];
     this.className = 'exp closure';
     this.getChildren = function() { return [this.body] }
     this.toString = function() {
@@ -265,8 +282,8 @@ function Exp() {
     break;
   
   case 'APP':
-    this.fun = arguments[1];
-    this.args = arguments[2];
+    this.fun = args[0];
+    this.args = args[1];
     this.getChildren = function() { return [this.fun, this.args] }
     this.className = 'exp app';
     this.toString = function() {
@@ -275,8 +292,8 @@ function Exp() {
     break;
   
   case 'CASE':
-    this.cond = arguments[1];
-    this.branches = arguments[2];
+    this.cond = args[0];
+    this.branches = args[1];
     this.className = 'exp case';
     this.getChildren = function() { return [this.cond, this.branches] }
     this.toString = function() {
@@ -285,7 +302,7 @@ function Exp() {
     break;
   
   default:
-    // clone calls this with 0 args all the time.
+    // clone calls this with 0 arguments all the time.
     if (this.type) console.warn('Unknown expression type', this.type);
   };
   
@@ -403,7 +420,14 @@ function createView(controller, e, viewConstructor) {
   e.meta.views.push(view);
   
   $.each(e.getChildren(), function(i, eChild) {
-    view.children.push(createView(controller, eChild, viewConstructor));
+    if (eChild.constructor == Array) {
+      $.each(eChild, function(j, eSubChild) {
+        view.children.push(createView(controller, eSubChild, viewConstructor));
+      });
+    }
+    else {
+      view.children.push(createView(controller, eChild, viewConstructor));
+    }
   });
   
   return view;
